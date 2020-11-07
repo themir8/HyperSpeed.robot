@@ -1,39 +1,110 @@
 package main
 
 import (
-	"log"
-	"time"
+	"fmt"
 
-	tb "gopkg.in/tucnak/telebot.v2"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
-var bot, _ = tb.NewBot(tb.Settings{
-	// here token
-	Token:  "1446049605:AAFU3Tzrp3SciOBQBS4dROnQFlsntxgy5to", // this token is not real
-	Poller: &tb.LongPoller{Timeout: 10 * time.Second},
-})
+// Главное меню
+var mainMenu = tgbotapi.NewReplyKeyboard(
+	tgbotapi.NewKeyboardButtonRow(
+		tgbotapi.NewKeyboardButton("Проверка кнопки"),
+		tgbotapi.NewKeyboardButtonContact("Отправить телефон"),
+	),
+	// tgbotapi.NewKeyboardButtonRow(
+	// ),
+	tgbotapi.NewKeyboardButtonRow(
+		tgbotapi.NewKeyboardButtonLocation("Отправить местоположение"),
+	),
+)
 
-// log.Fatal(err)
+var (
+	bot          *tgbotapi.BotAPI
+	err          error
+	updChannel   tgbotapi.UpdatesChannel
+	update       tgbotapi.Update
+	updConfig    tgbotapi.UpdateConfig
+	botUser      tgbotapi.User
+	phone        string
+	locationLink string
+	photography  []tgbotapi.PhotoSize
+)
 
 func main() {
 
-	bot.Handle("/start", startHandle)
-	bot.Handle(tb.OnText, textHandle)
-	log.Printf(
-		"Bot connected! FirstName: %s, UserName: @%s, is bot: %t, Bot id: %v.\n",
-		bot.Me.FirstName,
-		bot.Me.Username,
-		bot.Me.IsBot,
-		bot.Me.ID)
-	bot.Start()
-}
+	bot, err = tgbotapi.NewBotAPI("1446049605:AAFU3Tzrp3SciOBQBS4dROnQFlsntxgy5to")
+	if err != nil {
+		panic("bot init error: " + err.Error())
+	}
 
-func startHandle(m *tb.Message) {
-	log.Println("Hello", m.Chat.Username)
-	bot.Send(m.Sender, "Hello")
-}
+	botUser, err = bot.GetMe()
+	if err != nil {
+		panic("bot getme error: " + err.Error())
+	}
 
-func textHandle(m *tb.Message) {
-	// all the text messages that weren't
-	// captured by existing handlers
+	fmt.Printf("auth ok! bot is: %s\n", botUser.FirstName)
+
+	updConfig.Timeout = 60 //
+	updConfig.Limit = 1    // Неведомая хуйня, надо разобраться
+	updConfig.Offset = 0   //
+
+	updChannel, err = bot.GetUpdatesChan(updConfig)
+	if err != nil {
+		panic("update channel error: " + err.Error())
+	}
+
+	for {
+
+		update = <-updChannel
+
+		if update.Message != nil { // Обработка всех входящих сообщений
+			if update.Message.IsCommand() { // Обработка команд
+				cmdText := update.Message.Command()
+				if cmdText == "start" { // Действие на команду start
+					msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Главное меню")
+					msg.ReplyMarkup = mainMenu
+					bot.Send(msg)
+				}
+			} else {
+				if update.Message.Text == mainMenu.Keyboard[0][0].Text { // Обработка кнопки меню
+					msg := tgbotapi.NewMessage(update.Message.Chat.ID, "/start")
+					msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(false) // Спрятать клавиатуру
+					bot.Send(msg)
+
+				} else if update.Message.Text != "" { // Обработка текстовых сообщений
+					msg := tgbotapi.NewMessage(update.Message.Chat.ID, update.Message.Text)
+					bot.Send(msg)
+
+				} else if update.Message.Photo != nil { // Обработка входящих фотографий
+					photography = *update.Message.Photo
+					photoLastIndex := len(photography) - 1
+					photo := photography[photoLastIndex] // Получаем последний элемент массива (самую большую фотку)
+					photoMsg := tgbotapi.NewPhotoShare(update.Message.Chat.ID, photo.FileID)
+					bot.Send(photoMsg)
+					println("Photo id:", photo.FileID)
+
+				} else if update.Message.Contact != nil { // Запрашиваем номер телефона
+					phone = update.Message.Contact.PhoneNumber // Получаем номер телефона
+					msg := tgbotapi.NewMessage(update.Message.Chat.ID, phone)
+					bot.Send(msg)
+
+				} else if update.Message.Location != nil { // Запрашиваем местоположение
+					lat := fmt.Sprint(update.Message.Location.Latitude)                                     // широта
+					lon := fmt.Sprint(update.Message.Location.Longitude)                                    // долгота
+					locationLink = fmt.Sprintf("https://www.google.com/maps?q=%v,%v&hl=ru&gl=ru", lat, lon) // Создаем ссылку для гугл карт и отправляем
+					msg := tgbotapi.NewMessage(update.Message.Chat.ID, locationLink)
+					bot.Send(msg)
+
+				} else {
+					msg := tgbotapi.NewMessage(update.Message.Chat.ID, update.Message.Text)
+					bot.Send(msg)
+				}
+			}
+		} else {
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "nil")
+			bot.Send(msg)
+		}
+	}
+
 }
